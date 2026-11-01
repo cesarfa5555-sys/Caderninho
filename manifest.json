@@ -1,0 +1,14 @@
+{
+  "name": "Caderninho — Purytalent",
+  "short_name": "Caderninho",
+  "description": "Controle seu dinheiro do jeito simples: anote, lembre das contas e cobre pelo WhatsApp.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5efe0",
+  "theme_color": "#1f7a4d",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
