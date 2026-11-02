@@ -334,7 +334,240 @@
     });
   }
 
+  /* ======================================================================
+     Meu Pix (chave para receber)
+     ====================================================================== */
+  function openPixForm() {
+    const cur = Store.get().profile.pix || {};
+    let type = cur.type || 'cpf';
+    UI.openSheet({
+      title: 'Meu Pix',
+      html: `
+        <form class="form" autocomplete="off" novalidate>
+          ${UI.help('Cadastre a chave em que você recebe. Nas contas <b>a receber</b>, o app cria o <b>Pix copia e cola</b> e o <b>QR Code</b> já com o valor certo. O nome e a cidade devem ser iguais aos do seu banco.', { title: 'Receber por Pix' })}
+          ${UI.help('O app <b>não sabe</b> se o cliente pagou. Quando o dinheiro cair na sua conta, toque em <b>Recebi</b>.', { tone: 'warn', force: true })}
+          <div class="field"><span>Tipo da chave</span><div class="chips" data-types></div></div>
+          <label class="field"><span>Sua chave Pix</span>
+            <input type="text" name="key" maxlength="80" autocapitalize="off" spellcheck="false" value="${esc(cur.key || '')}">
+          </label>
+          <label class="field"><span>Seu nome <em>(como aparece no banco)</em></span>
+            <input type="text" name="name" maxlength="40" placeholder="Ex.: Maria da Silva" value="${esc(cur.name || Store.get().profile.name || '')}">
+          </label>
+          <label class="field"><span>Sua cidade</span>
+            <input type="text" name="city" maxlength="30" placeholder="Ex.: Recife" value="${esc(cur.city || '')}">
+          </label>
+          <div class="actions">
+            ${cur.key ? '<button type="button" class="btn danger-ghost" data-clear>Remover</button>' : ''}
+            <button type="submit" class="btn primary grow">Salvar Pix</button>
+          </div>
+        </form>`,
+      onMount(body, sheet) {
+        const form = body.querySelector('form');
+        const el = form.elements;
+        const chips = body.querySelector('[data-types]');
+
+        function paint() {
+          const t = C.Pix.KEY_TYPES.find((x) => x.id === type);
+          chips.innerHTML = C.Pix.KEY_TYPES.map((x) => `
+            <button type="button" class="chip ${x.id === type ? 'active' : ''}" data-type="${x.id}" aria-pressed="${x.id === type}">${esc(x.label)}</button>`).join('');
+          el.key.placeholder = t.placeholder;
+          el.key.inputMode = type === 'email' ? 'email' : type === 'random' ? 'text' : 'numeric';
+        }
+        chips.addEventListener('click', (e) => {
+          const b = e.target.closest('[data-type]');
+          if (b) { type = b.dataset.type; paint(); }
+        });
+        paint();
+
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const ok = safely(() => {
+            const key = C.Pix.validateKey(type, el.key.value);
+            const name = el.name.value.trim();
+            const city = el.city.value.trim();
+            C.Pix.build({ key, name, city }); // só para validar nome e cidade com mensagens claras
+            Store.setProfile({ pix: { type, key, name, city } });
+            UI.toast('Pix salvo', 'success');
+            return true;
+          });
+          if (ok) sheet.close();
+        });
+
+        const clear = body.querySelector('[data-clear]');
+        if (clear) {
+          clear.addEventListener('click', async () => {
+            const yes = await UI.confirmDialog({ title: 'Remover Pix?', message: 'As cobranças deixam de levar o Pix copia e cola.', okLabel: 'Remover', danger: true });
+            if (!yes) return;
+            Store.setProfile({ pix: null });
+            UI.toast('Pix removido', 'info');
+            sheet.close();
+          });
+        }
+      },
+    });
+  }
+
+  /* ======================================================================
+     Conta (entrar / criar conta) — sincronização na nuvem
+     ====================================================================== */
+  function openAccountForm() {
+    const Sync = C.Sync;
+    if (!Sync || !Sync.isConfigured()) { UI.toast('A conta ainda não está disponível neste app', 'info'); return; }
+    let mode = 'in'; // 'in' = entrar, 'up' = criar conta
+
+    UI.openSheet({
+      title: 'Minha conta',
+      html: `
+        <form class="form" autocomplete="on" novalidate>
+          ${UI.help('Com uma conta, seus dados ficam guardados na nuvem e você usa o Caderninho em outros aparelhos. <b>O app continua funcionando sem internet</b>: o que você anotar é enviado quando a internet voltar.', { title: 'Para que serve' })}
+          <div class="seg" role="group" aria-label="Entrar ou criar conta">
+            <button type="button" class="seg-btn" data-m="in">Entrar</button>
+            <button type="button" class="seg-btn" data-m="up">Criar conta</button>
+          </div>
+          <label class="field"><span>Seu e-mail</span>
+            <input type="email" name="email" inputmode="email" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="120" placeholder="voce@exemplo.com">
+          </label>
+          <label class="field"><span>Senha <em data-pw-hint></em></span>
+            <input type="password" name="password" autocomplete="current-password" maxlength="72">
+          </label>
+          <label class="check"><input type="checkbox" name="show"> Mostrar a senha</label>
+          <p class="form-msg" data-msg role="alert" hidden></p>
+          <div class="actions">
+            <button type="submit" class="btn primary grow" data-submit>Entrar</button>
+          </div>
+          <button type="button" class="link center" data-forgot>Esqueci minha senha</button>
+        </form>`,
+      onMount(body, sheet) {
+        const form = body.querySelector('form');
+        const el = form.elements;
+        const msg = body.querySelector('[data-msg]');
+        const submit = body.querySelector('[data-submit]');
+        const forgot = body.querySelector('[data-forgot]');
+        let busy = false;
+        let lastPending = null; // entrada que parou no aviso de 'outra conta' (para não repetir o cadastro)
+
+        function say(text, tone) {
+          msg.hidden = !text;
+          msg.textContent = text || '';
+          msg.className = 'form-msg' + (tone ? ' ' + tone : '');
+        }
+        function paint() {
+          body.querySelectorAll('.seg-btn').forEach((b) => {
+            const on = b.dataset.m === mode;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-pressed', String(on));
+          });
+          submit.textContent = mode === 'in' ? 'Entrar' : 'Criar minha conta';
+          el.password.autocomplete = mode === 'in' ? 'current-password' : 'new-password';
+          body.querySelector('[data-pw-hint]').textContent = mode === 'up' ? '(mínimo 8 caracteres)' : '';
+          forgot.hidden = mode !== 'in';
+          say('');
+        }
+        function setBusy(on) {
+          busy = on;
+          submit.disabled = on;
+          forgot.disabled = on;
+          if (on) submit.textContent = 'Aguarde…'; else paint2();
+        }
+        const cleanMail = (v) => String(v || '').trim().toLowerCase();
+        function paint2() { submit.textContent = mode === 'in' ? 'Entrar' : 'Criar minha conta'; }
+
+        body.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => { if (!busy) { mode = b.dataset.m; paint(); } }));
+        el.show.addEventListener('change', () => { el.password.type = el.show.checked ? 'text' : 'password'; });
+        paint();
+
+        /** Pergunta antes de trocar de conta; só continua (e apaga os dados locais) se a pessoa confirmar. */
+        async function confirmSwitch(pending) {
+          lastPending = pending;
+          const yes = await UI.confirmDialog({
+            title: 'Trocar de conta?',
+            message: 'Este aparelho tem dados de outra conta. Para entrar nesta, esses dados serão removidos daqui (eles continuam salvos na outra conta). Deseja continuar?',
+            okLabel: 'Trocar de conta', danger: true,
+          });
+          if (yes) return run(pending);
+          return undefined;
+        }
+
+        async function run(pending) {
+          setBusy(true); say('');
+          try {
+            if (pending) {
+              await Sync.continueWith(pending);
+              UI.toast('Conta conectada', 'success');
+              sheet.close();
+            } else if (mode === 'in') {
+              await Sync.signIn(el.email.value, el.password.value);
+              UI.toast('Conta conectada', 'success');
+              sheet.close();
+            } else {
+              const r = await Sync.signUp(el.email.value, el.password.value);
+              if (r.needsConfirm) {
+                mode = 'in'; paint();
+                say('Enviamos um e-mail de confirmação. Abra o e-mail, toque no link e depois volte aqui para entrar.', 'ok');
+              } else {
+                UI.toast('Conta criada e conectada', 'success');
+                sheet.close();
+              }
+            }
+          } catch (e) {
+            if (e && e.code === 'other-account') {
+              setBusy(false);
+              return await confirmSwitch(e.pending);
+            }
+            say((e && e.message) || 'Não deu certo. Tente de novo.', 'bad');
+          } finally {
+            if (busy) setBusy(false);
+          }
+          return undefined;
+        }
+
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          if (busy) return;
+          // já se identificou e parou no aviso de troca? pergunta de novo (nunca apaga sem confirmar)
+          if (lastPending && cleanMail(el.email.value) === lastPending.user.email) confirmSwitch(lastPending); else run(null);
+        });
+
+        forgot.addEventListener('click', async () => {
+          if (busy) return;
+          setBusy(true); say('');
+          try {
+            await Sync.recover(el.email.value);
+            say('Se esse e-mail tiver conta, você vai receber um link para criar uma nova senha.', 'ok');
+          } catch (e) {
+            say((e && e.message) || 'Não deu certo. Tente de novo.', 'bad');
+          } finally { setBusy(false); }
+        });
+      },
+    });
+  }
+
   /* ---------- Ações globais ---------- */
+  A['pix:settings'] = () => openPixForm();
+  A['account:open'] = () => openAccountForm();
+  A['account:sync'] = async () => {
+    const r = await C.Sync.syncNow();
+    if (r && r.offline) UI.toast('Sem internet. Sincroniza quando voltar.', 'info');
+    else if (r && r.ok) UI.toast('Tudo sincronizado', 'success');
+    else if (r && r.error) UI.toast(r.error, 'error');
+  };
+  A['account:signout'] = async () => {
+    const yes = await UI.confirmDialog({
+      title: 'Sair da conta?',
+      message: 'Seus dados continuam neste aparelho e na nuvem, mas param de sincronizar até você entrar de novo.',
+      okLabel: 'Sair',
+    });
+    if (!yes) return;
+    await C.Sync.signOut();
+    UI.toast('Você saiu da conta', 'info');
+  };
+  A['offline:check'] = async () => {
+    const r = await C.Offline.checkUpdate();
+    if (!r.supported) UI.toast('O modo offline não está ligado neste endereço', 'info');
+    else if (r.error) UI.toast('Não consegui procurar agora. Veja a internet.', 'error');
+    else if (r.found) UI.toast('Versão nova encontrada. Toque em Atualizar.', 'success');
+    else UI.toast('Você já está com a versão mais nova', 'success');
+  };
   A['tx:new'] = (el) => openTransactionForm({ type: el.dataset.type });
   A['tx:edit'] = (el) => {
     const tx = Store.getTransaction(el.dataset.id);
@@ -346,5 +579,5 @@
   A['goal:new'] = () => openGoalForm();
   A['goal:deposit'] = (el) => openDepositForm(el.dataset.id);
 
-  C.Forms = { openTransactionForm, openBillForm, openGoalForm, openDepositForm, openNameForm, safely };
+  C.Forms = { openTransactionForm, openBillForm, openGoalForm, openDepositForm, openNameForm, openPixForm, openAccountForm, safely };
 })(typeof window !== 'undefined' ? window : globalThis);

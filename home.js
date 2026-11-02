@@ -138,10 +138,16 @@
 
   C.Actions['demo:load'] = async () => {
     const s = Store.get();
-    if (s.transactions.length || s.bills.length) {
-      const yes = await UI.confirmDialog({ title: 'Carregar exemplo?', message: 'Isso substitui o que você já anotou por dados de exemplo.', okLabel: 'Carregar', danger: true });
+    const cloud = C.Sync && C.Sync.isLoggedIn();
+    if (s.transactions.length || s.bills.length || cloud) {
+      const yes = await UI.confirmDialog({
+        title: 'Carregar exemplo?',
+        message: 'Isso substitui o que você já anotou por dados de exemplo.' + (cloud ? ' Como você está conectado, os dados da sua conta na nuvem também seriam trocados.' : ''),
+        okLabel: 'Carregar', danger: true,
+      });
       if (!yes) return;
     }
+    if (C.prepareReplace) await C.prepareReplace();
     Store.loadDemo();
     C.Game.evaluate({ silent: true });
     UI.toast('Dados de exemplo carregados', 'success');

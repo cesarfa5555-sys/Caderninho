@@ -50,12 +50,15 @@
   function defaultState() {
     return {
       version: 1,
-      profile: { name: '', welcomed: false, createdAt: Date.now() },
+      profile: { name: '', welcomed: false, createdAt: Date.now(), updatedAt: 0 }, // + pix, hideHelp, muteSound
       transactions: [], // {id,type:'in'|'out',amount,category,note,date,createdAt,billId?,goalId?}
       bills: [],        // {id,kind:'pay'|'receive',title,amount,dueDate,recurring,recurDay,status:'open'|'done',person,phone,paidAt,lastChargeAt,nextId,createdAt}
       goals: [],        // {id,title,target,saved,doneAt,createdAt}
       game: { xp: 0, achievements: {}, days: [], daily: { date: '', count: 0 }, chargesSent: 0 },
+      // lápides de exclusão {k:'t'|'b'|'g', id, at}. Sem elas, a sincronização "ressuscitaria" o que foi apagado.
+      deleted: [],
     };
+    // Todo registro tem updatedAt (ms). A sincronização usa isso para saber qual versão é a mais nova.
   }
 
   let state = defaultState();
@@ -67,7 +70,9 @@
     const s = Object.assign(base, raw || {});
     s.profile = Object.assign(base.profile, (raw && raw.profile) || {});
     s.game = Object.assign(defaultState().game, (raw && raw.game) || {});
-    ['transactions', 'bills', 'goals'].forEach((k) => { if (!Array.isArray(s[k])) s[k] = []; });
+    ['transactions', 'bills', 'goals', 'deleted'].forEach((k) => { if (!Array.isArray(s[k])) s[k] = []; });
+    // dados antigos (sem updatedAt) passam a usar a data de criação
+    ['transactions', 'bills', 'goals'].forEach((k) => s[k].forEach((r) => { if (!r.updatedAt) r.updatedAt = r.createdAt || 0; }));
     return s;
   }
 
@@ -104,6 +109,29 @@
   /** Atalho para mexer no estado de qualquer lugar: Store.update(s => { ... }) */
   function update(fn) { fn(state); change(); }
 
+  /** Marca o registro como alterado agora (a sincronização compara isso). */
+  const touch = (o) => { o.updatedAt = Date.now(); return o; };
+
+  /** Guarda a lápide de uma exclusão. k: 't' lançamento, 'b' conta, 'g' meta. */
+  function tombstone(k, id) { state.deleted.push({ k, id, at: Date.now() }); }
+
+  /**
+   * Chamada depois de TROCAR todos os dados (restaurar backup, apagar tudo, exemplo):
+   * o que sumiu vira exclusão e o que entrou vale como "alterado agora", assim a
+   * sincronização entende que foi uma substituição e não mistura com a nuvem.
+   */
+  function finishReplace(old) {
+    const now = Date.now();
+    const deleted = (state.deleted || []).concat(old.deleted || []);
+    [['transactions', 't'], ['bills', 'b'], ['goals', 'g']].forEach(([col, k]) => {
+      const keep = new Set(state[col].map((r) => r.id));
+      old[col].forEach((r) => { if (!keep.has(r.id)) deleted.push({ k, id: r.id, at: now }); });
+      state[col].forEach((r) => { r.updatedAt = now; });
+    });
+    state.deleted = deleted;
+    state.profile.updatedAt = now;
+  }
+
   /* ---------- Lançamentos ---------- */
   function addTransaction(data, opts = {}) {
     const amount = Math.round(Number(data.amount));
@@ -117,6 +145,7 @@
       note: String(data.note || '').trim().slice(0, 80),
       date: data.date || U.today(),
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
     if (data.billId) tx.billId = data.billId;
     if (data.goalId) tx.goalId = data.goalId;
@@ -140,12 +169,14 @@
     if (patch.category) tx.category = patch.category;
     if (patch.note != null) tx.note = String(patch.note).trim().slice(0, 80);
     if (patch.date) tx.date = patch.date;
+    touch(tx);
     change();
     return tx;
   }
 
   function deleteTransaction(id) {
     state.transactions = state.transactions.filter((t) => t.id !== id);
+    tombstone('t', id);
     change();
   }
 
@@ -198,6 +229,7 @@
       lastChargeAt: null,
       nextId: null,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
     state.bills.push(bill);
     change();
@@ -224,12 +256,14 @@
     if (patch.recurring != null) b.recurring = !!patch.recurring;
     if (patch.person != null) b.person = String(patch.person).trim().slice(0, 40);
     if (patch.phone != null) b.phone = String(patch.phone).trim().slice(0, 20);
+    touch(b);
     change();
     return b;
   }
 
   function deleteBill(id) {
     state.bills = state.bills.filter((b) => b.id !== id);
+    tombstone('b', id);
     change();
   }
 
@@ -240,6 +274,7 @@
     const today = U.today();
     b.status = 'done';
     b.paidAt = today;
+    touch(b);
     const tx = {
       id: U.uid(),
       type: b.kind === 'receive' ? 'in' : 'out',
@@ -248,6 +283,7 @@
       note: b.title,
       date: today,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
       billId: b.id,
     };
     state.transactions.push(tx);
@@ -261,6 +297,7 @@
         lastChargeAt: null,
         nextId: null,
         createdAt: Date.now(),
+        updatedAt: Date.now(),
       });
       b.nextId = next.id;
       state.bills.push(next);
@@ -274,14 +311,19 @@
   function reopenBill(id) {
     const b = getBill(id);
     if (!b || b.status !== 'done') return null;
+    state.transactions.filter((t) => t.billId === id).forEach((t) => tombstone('t', t.id));
     state.transactions = state.transactions.filter((t) => t.billId !== id);
     if (b.nextId) {
       const n = getBill(b.nextId);
-      if (n && n.status === 'open') state.bills = state.bills.filter((x) => x.id !== n.id);
+      if (n && n.status === 'open') {
+        state.bills = state.bills.filter((x) => x.id !== n.id);
+        tombstone('b', n.id);
+      }
     }
     b.status = 'open';
     b.paidAt = null;
     b.nextId = null;
+    touch(b);
     change();
     return b;
   }
@@ -290,6 +332,7 @@
     const b = getBill(id);
     if (!b) return;
     b.lastChargeAt = U.today();
+    touch(b);
     state.game.chargesSent = (state.game.chargesSent || 0) + 1;
     emit('charge:sent', b);
     change();
@@ -307,7 +350,7 @@
     const target = Math.round(Number(data.target));
     if (!title) throw new Error('Dê um nome para a meta');
     if (!(target > 0)) throw new Error('Digite quanto você quer juntar');
-    const goal = { id: U.uid(), title: title.slice(0, 40), target, saved: 0, doneAt: null, createdAt: Date.now() };
+    const goal = { id: U.uid(), title: title.slice(0, 40), target, saved: 0, doneAt: null, createdAt: Date.now(), updatedAt: Date.now() };
     state.goals.push(goal);
     emit('goal:created', goal);
     change();
@@ -318,6 +361,7 @@
 
   function deleteGoal(id) {
     state.goals = state.goals.filter((g) => g.id !== id);
+    tombstone('g', id);
     change();
   }
 
@@ -328,9 +372,10 @@
     if (!g) return null;
     if (!(a > 0)) throw new Error('Digite um valor maior que zero');
     g.saved += a;
+    touch(g);
     state.transactions.push({
       id: U.uid(), type: 'out', amount: a, category: 'meta',
-      note: `Guardado: ${g.title}`, date: U.today(), createdAt: Date.now(), goalId: g.id,
+      note: `Guardado: ${g.title}`, date: U.today(), createdAt: Date.now(), updatedAt: Date.now(), goalId: g.id,
     });
     const justDone = !g.doneAt && g.saved >= g.target;
     if (justDone) g.doneAt = U.today();
@@ -343,6 +388,7 @@
   /* ---------- Perfil / dados ---------- */
   function setProfile(patch) {
     Object.assign(state.profile, patch);
+    state.profile.updatedAt = Date.now();
     change();
   }
 
@@ -356,23 +402,26 @@
     if (!data || !Array.isArray(data.transactions) || !Array.isArray(data.bills)) {
       throw new Error('Esse arquivo não parece ser um backup do Caderninho');
     }
+    const old = state;
     state = migrate(data);
     state.profile.welcomed = true;
+    finishReplace(old);
     change();
   }
 
   function reset() {
+    const old = state;
     state = defaultState();
     state.profile.welcomed = true;
+    finishReplace(old);
     change();
   }
 
-  /** Dados de exemplo para testar/demonstrar o app. Substitui os dados atuais (mantém o nome). */
+  /** Dados de exemplo para testar/demonstrar o app. Substitui os dados atuais (mantém nome, Pix e preferências). */
   function loadDemo() {
-    const name = state.profile.name;
+    const old = state;
     state = defaultState();
-    state.profile.name = name;
-    state.profile.welcomed = true;
+    state.profile = Object.assign({}, old.profile, { welcomed: true });
     const t = U.today();
     const d = (n) => U.addDays(t, -n);
     const rows = [
@@ -412,12 +461,104 @@
       bill('receive', 'Bolo de aniversário', 12000, -3, { person: 'Carla' }),
     );
     state.game.xp = 120;
+    finishReplace(old);
+    change();
+  }
+
+  /* ---------- Sincronização: mescla de dois estados ---------- */
+  const TOMBSTONE_TTL = 90 * 24 * 3600 * 1000; // lápides com mais de 90 dias são descartadas
+
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  /** Ordem total e determinística: mais novo primeiro; empate decide pelo texto (assim A+B == B+A). */
+  const newer = (x, y) => {
+    if ((x.updatedAt || 0) !== (y.updatedAt || 0)) return (x.updatedAt || 0) > (y.updatedAt || 0);
+    return JSON.stringify(x) > JSON.stringify(y);
+  };
+
+  /**
+   * Junta dois estados SEM perder nada de nenhum dos lados (função pura, não mexe no app).
+   *  • Lançamentos, contas e metas: junta pelo id; se os dois lados têm o mesmo registro, vale o mais novo.
+   *  • Exclusão: vale se for mais nova que a última alteração do registro (senão o registro "volta").
+   *  • Pontos (XP) e contadores: vale o maior. Conquistas e dias de sequência: união.
+   *  • Perfil: campo a campo, o lado mais novo ganha.
+   *  • Metas: o valor guardado é recalculado a partir dos depósitos (dois aparelhos podem depositar ao mesmo tempo).
+   * mergeStates(a, b) é igual a mergeStates(b, a).
+   */
+  function mergeStates(a, b, now) {
+    const A = migrate(clone(a));
+    const B = migrate(clone(b));
+    const out = defaultState();
+    const clock = now || Date.now();
+
+    const tombs = new Map();
+    A.deleted.concat(B.deleted).forEach((d) => {
+      const key = d.k + ':' + d.id;
+      const cur = tombs.get(key);
+      if (!cur || d.at > cur.at) tombs.set(key, d);
+    });
+
+    const survivors = new Set();
+    [['transactions', 't'], ['bills', 'b'], ['goals', 'g']].forEach(([col, k]) => {
+      const byId = new Map();
+      A[col].concat(B[col]).forEach((r) => {
+        const cur = byId.get(r.id);
+        if (!cur || newer(r, cur)) byId.set(r.id, r);
+      });
+      out[col] = Array.from(byId.values()).filter((r) => {
+        const t = tombs.get(k + ':' + r.id);
+        if (t && t.at >= (r.updatedAt || 0)) return false; // apagado depois da última alteração
+        survivors.add(k + ':' + r.id);
+        return true;
+      }).sort((x, y) => ((x.createdAt || 0) - (y.createdAt || 0)) || (x.id < y.id ? -1 : 1));
+    });
+    out.deleted = Array.from(tombs.values())
+      .filter((d) => !survivors.has(d.k + ':' + d.id) && d.at > clock - TOMBSTONE_TTL)
+      .sort((x, y) => (x.at - y.at) || (x.id < y.id ? -1 : 1));
+
+    // metas: o guardado vem da soma dos depósitos que existem de fato
+    out.goals.forEach((g) => {
+      const deps = out.transactions.filter((t) => t.goalId === g.id && t.category === 'meta');
+      if (!deps.length) return;
+      g.saved = deps.reduce((s, t) => s + t.amount, 0);
+      if (g.saved >= g.target && !g.doneAt) g.doneAt = deps.map((t) => t.date).sort().pop();
+    });
+
+    // jogo
+    const ga = A.game; const gb = B.game;
+    out.game.xp = Math.max(ga.xp || 0, gb.xp || 0);
+    out.game.chargesSent = Math.max(ga.chargesSent || 0, gb.chargesSent || 0);
+    const ach = {};
+    [ga.achievements || {}, gb.achievements || {}].forEach((m) => Object.keys(m).forEach((id) => {
+      if (!ach[id] || m[id] < ach[id]) ach[id] = m[id];
+    }));
+    out.game.achievements = ach;
+    out.game.days = Array.from(new Set((ga.days || []).concat(gb.days || []))).sort().slice(-400);
+    const da = ga.daily || { date: '', count: 0 }; const db = gb.daily || { date: '', count: 0 };
+    out.game.daily = da.date !== db.date ? (da.date > db.date ? da : db) : { date: da.date, count: Math.max(da.count, db.count) };
+
+    // perfil
+    const [older, newerP] = newer(A.profile, B.profile) ? [B.profile, A.profile] : [A.profile, B.profile];
+    out.profile = Object.assign({}, older, newerP);
+    out.profile.welcomed = !!(A.profile.welcomed || B.profile.welcomed);
+    out.profile.createdAt = Math.min(A.profile.createdAt || Infinity, B.profile.createdAt || Infinity);
+    if (!Number.isFinite(out.profile.createdAt)) out.profile.createdAt = clock;
+    out.profile.updatedAt = Math.max(A.profile.updatedAt || 0, B.profile.updatedAt || 0);
+    return out;
+  }
+
+  /** Cópia independente dos dados atuais (é isso que vai para a nuvem). */
+  const snapshot = () => clone(state);
+
+  /** Troca o estado por `next` (já mesclado) e avisa as telas. */
+  function replaceState(next) {
+    state = migrate(clone(next));
     change();
   }
 
   C.Store = {
     CATEGORIES, category,
     load, save, get, subscribe, on, emit, update,
+    snapshot, replaceState, merge: mergeStates,
     addTransaction, getTransaction, updateTransaction, deleteTransaction, txInRange, recentTx,
     totals, byCategory,
     addBill, getBill, updateBill, deleteBill, settleBill, reopenBill, markChargeSent, openBills, doneBills,

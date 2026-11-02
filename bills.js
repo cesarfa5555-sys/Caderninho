@@ -37,7 +37,8 @@
         </button>
         <div class="bill-actions">
           <button type="button" class="btn primary small grow" data-action="bill:settle" data-id="${b.id}">${I('check')} ${isRecv ? 'Recebi' : 'Paguei'}</button>
-          ${isRecv ? `<button type="button" class="btn wa small grow" data-action="bill:charge" data-id="${b.id}">${I('message')} Cobrar</button>` : ''}
+          ${isRecv ? `<button type="button" class="btn wa small grow" data-action="bill:charge" data-id="${b.id}">${I('message')} Cobrar</button>
+          <button type="button" class="btn ghost small grow" data-action="pix:show" data-id="${b.id}">${I('qr')} Pix</button>` : ''}
         </div>
         ${isRecv && b.lastChargeAt ? `<p class="hint">Última cobrança enviada em ${U.formatDate(b.lastChargeAt)}.</p>` : ''}
       </article>`;
@@ -78,7 +79,7 @@
         <button type="button" class="btn ghost" data-action="bill:new" data-kind="receive">${I('plus')} A receber</button>
       </div>
 
-      ${UI.help('Em contas <b>a receber</b>, o botão <b>Cobrar</b> abre o WhatsApp com a mensagem pronta. Para isso, cadastre o número do cliente com DDD. Contas marcadas <b>todo mês</b> voltam sozinhas depois de pagas.', { tone: 'tip' })}
+      ${UI.help('Em contas <b>a receber</b>, o botão <b>Cobrar</b> abre o WhatsApp com a mensagem pronta. Para isso, cadastre o número do cliente com DDD. Contas marcadas <b>todo mês</b> voltam sozinhas depois de pagas. Cadastre sua chave em <b>Perfil &gt; Meu Pix</b> e a cobrança já vai com o <b>Pix copia e cola</b>; o botão <b>Pix</b> mostra o QR Code.', { tone: 'tip' })}
 
       <div class="filters" role="group" aria-label="Filtrar contas">
         ${FILTERS.map((f) => `<button type="button" class="pill ${local.filter === f.id ? 'active' : ''}" data-action="bill:filter" data-filter="${f.id}">${f.label}</button>`).join('')}
@@ -155,6 +156,64 @@
     return `${hi} ${base}, com vencimento em ${U.formatDate(b.dueDate)}. Qualquer dúvida é só me chamar. Obrigado!`;
   }
 
+  /** Mensagem da cobrança + (se a pessoa cadastrou a chave) o Pix copia e cola. */
+  function chargeText(b) {
+    let msg = chargeMessage(b);
+    let pix = null;
+    try { pix = C.Pix.forBill(b, { qr: false }); } catch (e) { pix = null; }
+    if (pix) msg += `\n\nPara pagar por Pix, copie o código abaixo e cole no app do seu banco (Pix copia e cola):\n${pix.code}`;
+    return msg;
+  }
+
+  /** Mostra o QR Code e o Pix copia e cola de uma conta a receber. */
+  C.Actions['pix:show'] = (el) => {
+    const b = Store.getBill(el.dataset.id);
+    if (!b) return;
+    let pix = null;
+    if (C.Pix.getConfig()) {
+      try { pix = C.Pix.forBill(b); } catch (e) { UI.toast(e.message || 'Não consegui criar o Pix', 'error'); return; }
+    }
+    if (!pix) {
+      UI.openSheet({
+        title: 'Cobrar por Pix',
+        html: `
+          ${UI.help('Para gerar o QR Code e o Pix copia e cola, cadastre primeiro a sua chave Pix, o nome e a cidade. É rápido e só precisa fazer uma vez.', { title: 'Falta a sua chave', force: true })}
+          <div class="actions"><button type="button" class="btn primary grow" data-setup>${I('qr')} Cadastrar minha chave</button></div>`,
+        onMount(body, sheet) {
+          body.querySelector('[data-setup]').addEventListener('click', () => { sheet.close(); C.Forms.openPixForm(); });
+        },
+      });
+      return;
+    }
+    UI.openSheet({
+      title: 'Cobrar por Pix',
+      html: `
+        <div class="pix-box">
+          <div class="qr-wrap">${pix.svg}</div>
+          <p class="pix-amount">${U.formatMoney(b.amount)}</p>
+          <p class="hint">${esc(b.title)}${b.person ? ' · ' + esc(b.person) : ''}</p>
+        </div>
+        ${UI.help('O cliente pode <b>apontar a câmera do app do banco</b> para o QR Code, ou <b>copiar o código</b> abaixo e colar em &quot;Pix copia e cola&quot;. Quando o dinheiro cair, toque em <b>Recebi</b> na conta.', { tone: 'tip' })}
+        <label class="field"><span>Pix copia e cola</span>
+          <textarea class="pix-code" readonly rows="4" aria-label="Código Pix copia e cola">${esc(pix.code)}</textarea>
+        </label>
+        <div class="actions">
+          <button type="button" class="btn primary grow" data-copy>${I('copy')} Copiar código</button>
+          <button type="button" class="btn wa grow" data-wa>${I('message')} WhatsApp</button>
+        </div>`,
+      onMount(body, sheet) {
+        body.querySelector('[data-copy]').addEventListener('click', async () => {
+          const ok = await C.Pix.copyText(pix.code);
+          UI.toast(ok ? 'Código copiado' : 'Não consegui copiar. Segure o texto para copiar.', ok ? 'success' : 'error');
+        });
+        body.querySelector('[data-wa]').addEventListener('click', () => {
+          sheet.close();
+          C.Actions['bill:charge']({ dataset: { id: b.id } });
+        });
+      },
+    });
+  };
+
   C.Actions['bill:charge'] = (el) => {
     const b = Store.getBill(el.dataset.id);
     if (!b) return;
@@ -169,12 +228,12 @@
       C.Forms.openBillForm({ bill: b });
       return;
     }
-    const url = `https://wa.me/${phone}?text=${encodeURIComponent(chargeMessage(b))}`;
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(chargeText(b))}`;
     global.open(url, '_blank', 'noopener');
     Game.lastGain = 0;
     Store.markChargeSent(b.id);
     UI.toast(Game.lastGain ? `Cobrança pronta! +${Game.lastGain} XP` : 'Cobrança pronta!', 'success');
   };
 
-  C.Views.contas = { render, chargeMessage };
+  C.Views.contas = { render, chargeMessage, chargeText };
 })(typeof window !== 'undefined' ? window : globalThis);

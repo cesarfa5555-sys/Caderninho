@@ -8,8 +8,9 @@
   <meta name="theme-color" content="#1f7a4d">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon-192.png">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="features.css">
 </head>
 <body>
   <!-- Animação de abertura (só CSS; some sozinha. Toque para pular). -->
@@ -42,6 +43,7 @@
         <span class="brand-name">Caderninho</span>
       </a>
       <div class="topbar-right">
+        <a class="chip-net" id="netChip" href="#/perfil" hidden></a>
         <a class="chip-streak" id="streakChip" href="#/perfil" aria-label="Sua sequência"><i data-ic="sprout"></i> <b>0</b></a>
         <a class="avatar" id="avatar" href="#/perfil" aria-label="Seu perfil"><i data-ic="user"></i></a>
       </div>
@@ -63,9 +65,12 @@
   <!-- Ordem importa: cada arquivo usa o anterior. Sem build, sem dependências. -->
   <script src="utils.js"></script>
   <script src="icons.js"></script>
+  <script src="config.js"></script>
   <script src="store.js"></script>
   <script src="game.js"></script>
   <script src="ui.js"></script>
+  <script src="qr.js"></script>
+  <script src="pix.js"></script>
   <script src="forms.js"></script>
   <script src="home.js"></script>
   <script src="transactions.js"></script>
@@ -73,6 +78,8 @@
   <script src="summary.js"></script>
   <script src="goals.js"></script>
   <script src="profile.js"></script>
+  <script src="sync.js"></script>
+  <script src="offline.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

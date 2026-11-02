@@ -77,6 +77,19 @@
     bag: '<path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8V6a3 3 0 016 0v2"/>',
     package: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
     inbox: '<path d="M4 13l2-8h12l2 8v6H4v-6z"/><path d="M4 13h5a3 3 0 006 0h5"/>',
+
+    /* pix, conta na nuvem e modo offline */
+    qr: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20v.01M17 20h3v-3"/>',
+    copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/>',
+    cloud: '<path d="M7 18a4 4 0 01-.6-7.95A5.5 5.5 0 0117 9.5a4.25 4.25 0 01.5 8.5H7z"/>',
+    'cloud-off': '<path d="M3 3l18 18"/><path d="M8.2 6.6A5.5 5.5 0 0117 9.5a4.25 4.25 0 011.9 8M7 18a4 4 0 01-1.4-7.7"/>',
+    'wifi-off': '<path d="M3 3l18 18"/><path d="M8.5 16.4a5 5 0 017 0M5 12.9a10 10 0 015-2.7M19 12.9a10 10 0 00-2.7-2M12 20h.01"/>',
+    refresh: '<path d="M20 11a8 8 0 00-14.5-3.5M4 4v4h4M4 13a8 8 0 0014.5 3.5M20 20v-4h-4"/>',
+    'log-in': '<path d="M10 4H6a2 2 0 00-2 2v12a2 2 0 002 2h4M14 8l4 4-4 4M18 12H9"/>',
+    'log-out': '<path d="M14 4h4a2 2 0 012 2v12a2 2 0 01-2 2h-4M10 8l-4 4 4 4M6 12h9"/>',
+    mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+    lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
+    download: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',
   };
 
   /** Devolve o <svg> do ícone (herda cor e tamanho do texto ao redor). */

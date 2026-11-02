@@ -1,0 +1,65 @@
+/* ==========================================================================
+   Caderninho — features.css
+   Estilos das funções novas (Pix, conta/sincronização, modo offline).
+   Fica separado do style.css de propósito: assim o time pode mexer no visual
+   geral sem dar conflito aqui. Usa as mesmas variáveis (--green, --line, --fs-*)
+   e tudo em rem, como o resto do app.
+   ========================================================================== */
+
+/* ---------- Pix ---------- */
+.pix-box { display: grid; justify-items: center; gap: .45rem; text-align: center; }
+.qr-wrap {
+  width: min(100%, 15.5rem); padding: .55rem; background: #fff;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm);
+}
+.qr-wrap .qr { display: block; width: 100%; height: auto; }
+.pix-amount { font-size: 1.7rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.pix-code {
+  width: 100%; min-height: 5.5rem; padding: .6rem .75rem; resize: none;
+  border: 1.5px solid var(--line); border-radius: .85rem; background: var(--card); color: var(--ink);
+  font: .72rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all;
+}
+.pix-code:focus { border-color: var(--green); outline: none; }
+
+/* ---------- Conta e nuvem (formulário e cartão no Perfil) ---------- */
+.field input[type="email"], .field input[type="password"] {
+  width: 100%; min-height: max(var(--tap), 2.8rem); padding: .55rem .85rem; border-radius: .85rem;
+  border: 1.5px solid var(--line); background: var(--card); font-size: var(--fs-body);
+}
+.form-msg { padding: .6rem .8rem; border-radius: var(--radius-sm); font-size: var(--fs-small); line-height: 1.4; background: var(--paper-2); }
+.form-msg.ok { background: var(--green-soft); color: var(--green-d); }
+.form-msg.bad { background: var(--red-soft); color: var(--red); font-weight: 600; }
+.link.center { display: block; margin: 0 auto; min-height: var(--tap); }
+.link.center[disabled] { opacity: .5; }
+.row.static { cursor: default; }
+.card-actions { display: grid; gap: .5rem; padding: .35rem .15rem .15rem; }
+.card-actions.two { grid-template-columns: 1fr 1fr; }
+
+/* ---------- Indicador de internet / sincronização (topo) ---------- */
+.chip-net {
+  display: inline-flex; align-items: center; gap: .3rem; max-width: 9rem;
+  padding: .3rem .6rem; border-radius: 999px; text-decoration: none;
+  font-size: var(--fs-small); font-weight: 700; white-space: nowrap;
+}
+.chip-net[hidden] { display: none; }
+.chip-net .ic { width: 1rem; height: 1rem; flex: none; }
+.chip-net.off { background: var(--gold-soft); color: #a8700a; }
+.chip-net.busy { background: var(--blue-soft); color: var(--blue); }
+.chip-net.err { background: var(--red-soft); color: var(--red); }
+.chip-net.busy .ic { animation: net-spin 1s linear infinite; }
+@keyframes net-spin { to { transform: rotate(360deg); } }
+@media (max-width: 359px) { .chip-net span { display: none; } }
+
+/* ---------- Faixa "nova versão disponível" ---------- */
+.update-bar {
+  position: fixed; z-index: 60; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--tabbar-h) + .75rem + env(safe-area-inset-bottom));
+  width: min(calc(100% - 1.5rem), 28rem);
+  display: flex; align-items: center; gap: .6rem; padding: .55rem .6rem .55rem .9rem;
+  background: var(--ink); color: var(--paper); border-radius: var(--radius);
+  box-shadow: var(--shadow); font-size: var(--fs-small); font-weight: 600;
+}
+.update-bar > span { flex: 1; min-width: 0; display: flex; align-items: center; gap: .45rem; }
+.update-bar .ic { width: 1rem; height: 1rem; flex: none; }
+.update-bar .btn.small { flex: none; }
+.update-bar .icon-btn { flex: none; background: transparent; color: inherit; }

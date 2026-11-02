@@ -190,6 +190,8 @@
     Game.evaluate({ silent: true });
     bindEvents();
     render();
+    if (C.Sync) C.Sync.init();       // conta e sincronização (só liga se config.js estiver preenchido)
+    if (C.Offline) C.Offline.init(); // modo offline (Service Worker) e aviso de internet
     // a boas-vindas só abre depois da animação (senão o teclado aparece por baixo dela)
     if (!Store.get().profile.welcomed) splash.then(() => C.Forms.openNameForm({ welcome: true }));
   }
